@@ -46,6 +46,7 @@ class Project:
 @dataclass
 class AppSettings:
     comfy_url: str = "http://127.0.0.1:8188"
+    comfy_path: str = ""
     workflow_path: str = ""
     planner_mode: str = "Template"
     ollama_url: str = "http://127.0.0.1:11434"
