@@ -4,6 +4,35 @@
 
 Drop in reference photos of an AI model/influencer, describe a topic or direction, let ZeroAI split the idea into short H3-friendly scenes, generate those scenes through ComfyUI, and stitch the results into one finished MP4.
 
+## v0.3.0 — performance controls + live progress
+
+- **Real ComfyUI sampler progress** over WebSocket instead of sitting at 0% until a scene finishes.
+- Generation status now shows phases such as **Loading H3 model**, **Encoding references**, **Sampling 5/12**, **Decoding**, **Muxing**, **Saving**, and **Downloading**.
+- Sampling status includes an ETA once enough real progress has been observed.
+- New **Settings → H3 Performance** panel.
+- **Auto (GPU-aware)** preset reads ComfyUI `/system_stats` and selects a safer profile based on VRAM/RAM.
+- Built-in **RTX 3060 Laptop / Low VRAM** preset: `0.40 MP`, `12 steps`, first `3` references, `ref_image_size=match`.
+- Fast Preview, Balanced, Native Quality, and Custom presets.
+- Resolution can be set to `0.40`, `0.70`, `0.90`, or native `0.98 MP`.
+- Sampling steps can be set from 4–40.
+- Reference limit can be set from 1–9 so low-memory machines do not pay the cost of all nine references on every scene.
+- Reference image sizing can use `match` (faster / lower memory) or `max` (stronger identity / slower).
+- H3 no longer forces every render back to the native 0.98 MP canvas when a lower preview resolution is selected.
+
+### Recommended RTX 3060 Laptop settings
+
+For a typical RTX 3060 Laptop GPU with about 6 GB VRAM and 16 GB system RAM, start with:
+
+```text
+Preset:          Auto (GPU-aware) or RTX 3060 Laptop / Low VRAM
+Resolution:      0.40 MP
+Steps:           12
+Reference limit: 3
+Reference size:  match
+```
+
+For a final render, try `0.70 MP` and 16–20 steps if the preview is stable. Native `0.98 MP / 20 steps` is the H3 quality target but can be extremely slow on a 6 GB laptop GPU because the 33B model has to offload heavily to system memory.
+
 ## v0.2.1 hotfix
 
 - Fixes Comfy Desktop installations that keep models in a shared/launcher-managed directory instead of `<ComfyUI>\models`.
@@ -11,9 +40,9 @@ Drop in reference photos of an AI model/influencer, describe a topic or directio
 - Understands current Comfy Desktop shared model libraries plus the legacy Desktop `basePath` configuration.
 - Automatically replaces stale v0.2 model paths with the model library actually used by the running backend.
 - **Reuses already-downloaded H3 files** from the old v0.2 location. On the same NTFS volume ZeroAI uses hard links, so there is no second 43 GB copy; otherwise it moves the files before attempting any new download.
-- Settings now reports H3 status against the **active** model library, matching what ComfyUI itself sees.
+- Settings reports H3 status against the **active** model library, matching what ComfyUI itself sees.
 
-## v0.2 features
+## Core features
 
 - Windows-only PySide6 desktop UI
 - Drag/drop up to 9 influencer reference images
@@ -26,14 +55,13 @@ Drop in reference photos of an AI model/influencer, describe a topic or directio
 - MiniMax H3 Ref2VA generation through ComfyUI's HTTP API
 - **Built-in ZeroAI H3 API workflows — no manual JSON setup required**
 - **Adaptive 1–9 reference workflow selection**
-- **Automatic ComfyUI folder detection on Windows**
+- **Automatic ComfyUI model-library detection on Windows**
 - **One-click Download / Repair H3 setup**
 - **Resumable official model downloads with progress and disk-space checks**
 - **H3 readiness checks before generation**
-- **Friendly missing-model / outdated-ComfyUI errors instead of raw workflow failures**
 - Automatic H3 canvas and frame-grid normalization
 - Automatic reference image upload
-- Queue/poll/download flow for every scene
+- Queue/progress/download flow for every scene
 - Automatic final MP4 stitching with FFmpeg
 - Built-in video preview
 - Save/open `.zeroai.json` projects
@@ -86,7 +114,7 @@ You can still select a custom ComfyUI API workflow in Settings. Custom workflows
 | `{{SEED}}` | random seed |
 | `{{REFERENCE_1}}` … `{{REFERENCE_9}}` | uploaded ComfyUI input image names |
 
-For MiniMax H3 workflows, ZeroAI automatically normalizes the canvas to H3's native area/multiple-of-32 requirements and snaps duration to the model's `17k+5` frame grid at 24 fps.
+For MiniMax H3 workflows, ZeroAI normalizes the canvas to a multiple of 32 and snaps duration to the model's `17k+5` frame grid at 24 fps. The selected H3 Performance resolution controls the target pixel count, capped at H3's native canvas.
 
 ## Quick start
 
@@ -94,11 +122,12 @@ For MiniMax H3 workflows, ZeroAI automatically normalizes the canvas to H3's nat
 2. Launch ZeroAI.
 3. Open **Settings**.
 4. Click **Detect** while ComfyUI is running; ZeroAI will resolve the active model library.
-5. Click **Download / Repair H3** if H3 is not ready. Existing v0.2 downloads are reused automatically when possible.
-6. Restart ComfyUI after the model repair/install completes.
-7. Add 1–9 influencer reference images in ZeroAI.
-8. Type the topic/direction.
-9. Click **Plan Scenes**, review them if desired, then **Generate Video**.
+5. Click **Download / Repair H3** if H3 is not ready.
+6. In **H3 Performance**, leave **Auto (GPU-aware)** selected or choose a preset.
+7. Restart ComfyUI after model repair/install if needed.
+8. Add your influencer reference images in ZeroAI.
+9. Type the topic/direction.
+10. Click **Plan Scenes**, review them if desired, then **Generate Video**.
 
 ### Optional local AI planner
 
@@ -122,6 +151,6 @@ No installer is required.
 
 ## Notes
 
-MiniMax H3 is a large model. ZeroAI is the controller/UI; generation performance and VRAM requirements depend on your GPU, ComfyUI configuration and H3 model stack.
+MiniMax H3 is a very large model. ZeroAI is the controller/UI; generation performance and memory pressure depend on your GPU, ComfyUI configuration, resolution, step count, scene duration, and number of reference images.
 
 Review the MiniMax H3 license before redistribution or commercial deployment, and clearly disclose AI-generated content where required.
