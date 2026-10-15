@@ -273,4 +273,4 @@ def prepare_workflow(
     for i in range(1, 10):
         replacements[f"{{{{REFERENCE_{i}}}}}"] = references[i - 1] if i <= len(references) else ""
     result = _replace(copy.deepcopy(template), replacements)
-    return _prune_unused_reference_nodes(result)
+    return _prune_unused_reference_nodes(result) if is_h3 else result
