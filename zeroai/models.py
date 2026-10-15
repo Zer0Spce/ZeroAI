@@ -54,6 +54,14 @@ class AppSettings:
     output_root: str = str(Path.home() / "Documents" / "ZeroAI")
     poll_interval_seconds: float = 2.0
 
+    # MiniMax H3 performance controls. Auto is intentionally conservative on
+    # low-VRAM laptops and is resolved from ComfyUI /system_stats at render time.
+    h3_performance_preset: str = "Auto (GPU-aware)"
+    h3_megapixels: float = 0.40
+    h3_steps: int = 12
+    h3_max_references: int = 3
+    h3_ref_image_size: str = "match"
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}

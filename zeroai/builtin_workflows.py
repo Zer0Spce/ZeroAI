@@ -13,6 +13,9 @@ AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 REF2VA_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
 TEXT_ENCODER = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 
+H3_NATIVE_MEGAPIXELS = 0.98
+H3_NATIVE_MAX_PIXELS = 768 * 1344
+
 
 def align_h3_frames(frame_count: int) -> int:
     """Snap a frame count up to MiniMax H3's 17k+5 grid."""
@@ -20,21 +23,33 @@ def align_h3_frames(frame_count: int) -> int:
     return n + (5 - (n % 17)) % 17
 
 
-def adapt_h3_canvas(width: int, height: int) -> tuple[int, int]:
-    """Match ComfyUI's H3 768-short-edge canvas with the 768x1344 area cap."""
+def adapt_h3_canvas(width: int, height: int, megapixels: float | None = None) -> tuple[int, int]:
+    """Build an H3 canvas on the 32px grid.
+
+    With ``megapixels=None`` this preserves the previous native-canvas behavior
+    (768px short edge / roughly 0.98 MP). A lower megapixel target is useful for
+    fast previews and low-VRAM machines.
+    """
     width = max(32, int(width))
     height = max(32, int(height))
     ratio = width / height
-    base_short_edge = 768
-    max_pixels = 768 * 1344
-    if ratio >= 1.0:
-        nominal_w, nominal_h = base_short_edge * ratio, base_short_edge
+
+    if megapixels is not None:
+        target_pixels = max(32 * 32, float(megapixels) * 1024 * 1024)
+        target_pixels = min(float(H3_NATIVE_MAX_PIXELS), target_pixels)
+        nominal_h = math.sqrt(target_pixels / ratio)
+        nominal_w = nominal_h * ratio
     else:
-        nominal_w, nominal_h = base_short_edge, base_short_edge / ratio
-    if nominal_w * nominal_h > max_pixels:
-        scale = math.sqrt(max_pixels / (nominal_w * nominal_h))
-        nominal_w *= scale
-        nominal_h *= scale
+        base_short_edge = 768
+        if ratio >= 1.0:
+            nominal_w, nominal_h = base_short_edge * ratio, base_short_edge
+        else:
+            nominal_w, nominal_h = base_short_edge, base_short_edge / ratio
+        if nominal_w * nominal_h > H3_NATIVE_MAX_PIXELS:
+            scale = math.sqrt(H3_NATIVE_MAX_PIXELS / (nominal_w * nominal_h))
+            nominal_w *= scale
+            nominal_h *= scale
+
     out_w = max(32, round(nominal_w / 32) * 32)
     out_h = max(32, round(nominal_h / 32) * 32)
     return out_w, out_h

@@ -4,11 +4,18 @@ import copy
 import json
 import random
 import time
+import uuid
 from pathlib import Path
 from typing import Callable, Iterable
 from urllib.parse import urlencode
 
 import requests
+
+try:
+    from websocket import WebSocketTimeoutException, create_connection
+except ImportError:  # pragma: no cover - dependency is included in packaged builds
+    WebSocketTimeoutException = TimeoutError
+    create_connection = None
 
 from .builtin_workflows import (
     AUDIO_VAE,
@@ -31,11 +38,18 @@ class ComfyClient:
         self.base_url = base_url.rstrip("/")
         self.poll_interval = poll_interval
         self.session = requests.Session()
+        self.client_id = f"zeroai-{uuid.uuid4().hex}"
+
+    def system_stats(self) -> dict:
+        response = self.session.get(self.base_url + "/system_stats", timeout=8)
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
 
     def check(self) -> bool:
         try:
-            response = self.session.get(self.base_url + "/system_stats", timeout=4)
-            return response.ok
+            self.system_stats()
+            return True
         except requests.RequestException:
             return False
 
@@ -105,7 +119,7 @@ class ComfyClient:
     def queue(self, workflow: dict) -> str:
         response = self.session.post(
             self.base_url + "/prompt",
-            json={"prompt": workflow, "client_id": "zeroai-windows"},
+            json={"prompt": workflow, "client_id": self.client_id},
             timeout=60,
         )
         if not response.ok:
@@ -123,29 +137,111 @@ class ComfyClient:
             raise ComfyError("ComfyUI did not return a prompt_id")
         return prompt_id
 
+    def _websocket_url(self) -> str:
+        if self.base_url.startswith("https://"):
+            root = "wss://" + self.base_url[len("https://"):]
+        elif self.base_url.startswith("http://"):
+            root = "ws://" + self.base_url[len("http://"):]
+        else:
+            root = "ws://" + self.base_url
+        return root + "/ws?clientId=" + self.client_id
+
+    def _history_record(self, prompt_id: str) -> dict | None:
+        response = self.session.get(self.base_url + f"/history/{prompt_id}", timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        if prompt_id not in payload:
+            return None
+        record = payload[prompt_id]
+        status = record.get("status", {})
+        if status.get("status_str") == "error":
+            messages = status.get("messages") or []
+            detail = str(messages[-1])[:1200] if messages else ""
+            raise ComfyError("ComfyUI generation failed" + (f": {detail}" if detail else ""))
+        return record
+
     def wait(
         self,
         prompt_id: str,
         on_status: Callable[[str], None] | None = None,
+        on_progress: Callable[[int, int, str | None], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
     ) -> dict:
-        while True:
-            if cancelled and cancelled():
-                raise ComfyError("Generation cancelled")
-            response = self.session.get(self.base_url + f"/history/{prompt_id}", timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            if prompt_id in payload:
-                record = payload[prompt_id]
-                status = record.get("status", {})
-                if status.get("status_str") == "error":
-                    raise ComfyError("ComfyUI generation failed")
-                if on_status:
-                    on_status(status.get("status_str", "complete"))
-                return record
-            if on_status:
-                on_status("generating")
-            time.sleep(self.poll_interval)
+        """Wait for a prompt while streaming real sampler progress when available.
+
+        ComfyUI sends sampler ``value/max`` updates over its websocket. History
+        polling stays active as a fallback, so generation still works if a proxy,
+        firewall, or older ComfyUI build prevents websocket progress events.
+        """
+        ws = None
+        if create_connection is not None:
+            try:
+                ws = create_connection(self._websocket_url(), timeout=1.0, suppress_origin=True)
+            except Exception:
+                ws = None
+
+        last_history = 0.0
+        last_status = ""
+        try:
+            while True:
+                if cancelled and cancelled():
+                    raise ComfyError("Generation cancelled")
+
+                if ws is not None:
+                    try:
+                        message = ws.recv()
+                        if isinstance(message, str):
+                            event = json.loads(message)
+                            event_type = event.get("type")
+                            data = event.get("data", {}) if isinstance(event, dict) else {}
+                            event_prompt = data.get("prompt_id") if isinstance(data, dict) else None
+                            if event_prompt and event_prompt != prompt_id:
+                                continue
+                            if event_type == "progress" and isinstance(data, dict):
+                                value = int(data.get("value", 0) or 0)
+                                maximum = int(data.get("max", 0) or 0)
+                                node = data.get("node")
+                                if maximum > 0 and on_progress:
+                                    on_progress(value, maximum, str(node) if node is not None else None)
+                            elif event_type in {"executing", "execution_start", "execution_cached"} and isinstance(data, dict):
+                                node = data.get("node")
+                                status_text = f"executing:{node}" if node is not None else "executing"
+                                if on_status and status_text != last_status:
+                                    last_status = status_text
+                                    on_status(status_text)
+                            elif event_type == "execution_error" and isinstance(data, dict):
+                                message_text = data.get("exception_message") or data.get("exception_type") or "ComfyUI execution error"
+                                raise ComfyError(str(message_text))
+                    except WebSocketTimeoutException:
+                        pass
+                    except ComfyError:
+                        raise
+                    except Exception:
+                        try:
+                            ws.close()
+                        except Exception:
+                            pass
+                        ws = None
+
+                now = time.monotonic()
+                if now - last_history >= self.poll_interval or ws is None:
+                    record = self._history_record(prompt_id)
+                    last_history = now
+                    if record is not None:
+                        if on_status:
+                            on_status("complete")
+                        return record
+                    if on_status and not last_status:
+                        on_status("generating")
+
+                if ws is None:
+                    time.sleep(min(self.poll_interval, 1.0))
+        finally:
+            if ws is not None:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _output_candidates(record: dict) -> Iterable[dict]:
@@ -253,11 +349,14 @@ def prepare_workflow(
     duration: int,
     references: list[str],
     seed: int | None = None,
+    steps: int | None = None,
+    h3_megapixels: float | None = None,
+    ref_image_size: str = "match",
 ) -> dict:
     seed = seed if seed is not None else random.randint(1, 2_147_483_647)
     is_h3 = _is_h3_workflow(template)
     if is_h3:
-        width, height = adapt_h3_canvas(width, height)
+        width, height = adapt_h3_canvas(width, height, h3_megapixels)
         frames = align_h3_frames(int(duration * 24))
     else:
         frames = max(1, int(duration * 24))
@@ -273,4 +372,17 @@ def prepare_workflow(
     for i in range(1, 10):
         replacements[f"{{{{REFERENCE_{i}}}}}"] = references[i - 1] if i <= len(references) else ""
     result = _replace(copy.deepcopy(template), replacements)
-    return _prune_unused_reference_nodes(result) if is_h3 else result
+
+    if is_h3:
+        effective_steps = min(100, max(1, int(steps if steps is not None else 20)))
+        effective_ref_size = ref_image_size if ref_image_size in {"match", "max"} else "match"
+        for node in result.values():
+            if not isinstance(node, dict):
+                continue
+            if node.get("class_type") == "BasicScheduler":
+                node.setdefault("inputs", {})["steps"] = effective_steps
+            elif node.get("class_type") == "MiniMaxH3ReferenceToVideo":
+                node.setdefault("inputs", {})["ref_image_size"] = effective_ref_size
+        return _prune_unused_reference_nodes(result)
+
+    return result

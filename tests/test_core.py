@@ -6,6 +6,7 @@ from zeroai.builtin_workflows import BUILTIN_H3_URI, align_h3_frames, adapt_h3_c
 from zeroai.comfy import load_workflow, prepare_workflow
 from zeroai.h3_setup import detect_comfyui_root, runtime_model_roots_from_stats
 from zeroai.models import AppSettings
+from zeroai.performance import LOW_VRAM_PRESET, auto_profile, resolve_profile
 from zeroai.planner import create_plan
 
 
@@ -69,10 +70,46 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(load_images[0]["inputs"]["image"], "one.png")
         self.assertEqual(load_images[1]["inputs"]["image"], "two.png")
 
+    def test_h3_low_vram_controls_change_canvas_steps_and_ref_size(self):
+        template = load_workflow(BUILTIN_H3_URI)
+        result = prepare_workflow(
+            template,
+            prompt="<Picture 1> talks to camera",
+            width=768,
+            height=1360,
+            duration=5,
+            references=["one.png"],
+            steps=12,
+            h3_megapixels=0.40,
+            ref_image_size="max",
+        )
+        h3 = result["136"]["inputs"]
+        self.assertEqual((h3["width"], h3["height"]), (480, 864))
+        self.assertEqual(h3["ref_image_size"], "max")
+        self.assertEqual(result["124"]["inputs"]["steps"], 12)
+
     def test_h3_grid_helpers(self):
         self.assertEqual(align_h3_frames(240), 243)
         self.assertEqual(adapt_h3_canvas(1360, 768), (1344, 768))
         self.assertEqual(adapt_h3_canvas(1024, 1024), (768, 768))
+        self.assertEqual(adapt_h3_canvas(768, 1360, 0.40), (480, 864))
+        self.assertEqual(adapt_h3_canvas(768, 1360, 0.98), (768, 1344))
+
+    def test_auto_performance_chooses_low_vram_for_3060_class_laptop(self):
+        stats = {
+            "system": {"ram_total": 16 * 1024**3},
+            "devices": [{"name": "NVIDIA GeForce RTX 3060 Laptop GPU", "vram_total": 6 * 1024**3}],
+        }
+        profile = auto_profile(stats)
+        self.assertEqual(profile.name, LOW_VRAM_PRESET)
+        self.assertEqual(profile.megapixels, 0.40)
+        self.assertEqual(profile.steps, 12)
+        self.assertEqual(profile.max_references, 3)
+
+        settings = AppSettings()
+        effective = resolve_profile(settings, stats)
+        self.assertEqual(effective.megapixels, 0.40)
+        self.assertEqual(effective.steps, 12)
 
     def test_detect_comfyui_preferred_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
