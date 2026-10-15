@@ -51,9 +51,10 @@ class H3DownloadThread(QThread):
     installed = Signal()
     failed = Signal(str)
 
-    def __init__(self, comfy_root: str):
+    def __init__(self, comfy_root: str, comfy_url: str):
         super().__init__()
         self.comfy_root = comfy_root
+        self.comfy_url = comfy_url
         self._cancelled = False
 
     def cancel(self):
@@ -63,6 +64,7 @@ class H3DownloadThread(QThread):
         try:
             install_h3_models(
                 self.comfy_root,
+                comfy_url=self.comfy_url,
                 progress=lambda percent, text: self.progress_changed.emit(percent, text),
                 log=self.log_line.emit,
                 cancelled=lambda: self._cancelled,
@@ -97,13 +99,13 @@ def install_h3_integration(ui_module) -> None:
             grid = QGridLayout(group)
 
             self.comfy_path = QLineEdit(getattr(settings, "comfy_path", ""))
-            self.comfy_path.setPlaceholderText(r"Example: C:\ComfyUI or ...\ComfyUI_windows_portable\ComfyUI")
+            self.comfy_path.setPlaceholderText(r"ZeroAI detects the model library used by the running ComfyUI instance")
             detect_btn = QPushButton("Detect")
             browse_btn = QPushButton("Browse…")
             detect_btn.clicked.connect(self.detect_comfyui)
             browse_btn.clicked.connect(self.browse_comfyui)
 
-            grid.addWidget(QLabel("ComfyUI folder"), 0, 0)
+            grid.addWidget(QLabel("ComfyUI / model library"), 0, 0)
             grid.addWidget(self.comfy_path, 0, 1)
             path_buttons = QHBoxLayout()
             path_buttons.addWidget(detect_btn)
@@ -158,8 +160,8 @@ def install_h3_integration(ui_module) -> None:
             grid.addLayout(install_row, 6, 0, 1, 3)
 
             note = QLabel(
-                "Downloads the official Comfy-Org MiniMax H3 Ref2VA model, Qwen3-VL encoder, "
-                "video VAE, and audio VAE directly into ComfyUI. Restart ComfyUI after installation."
+                "ZeroAI reads the model paths from the running ComfyUI process, including Comfy Desktop shared libraries. "
+                "Download / Repair reuses existing v0.2 files when possible instead of downloading them again."
             )
             note.setWordWrap(True)
             note.setObjectName("Muted")
@@ -169,9 +171,14 @@ def install_h3_integration(ui_module) -> None:
             insert_at = max(0, root_layout.count() - 1)
             root_layout.insertWidget(insert_at, group)
 
-            if not self.comfy_path.text().strip():
-                self.detect_comfyui(quiet=True)
+            # v0.2 could save the ComfyUI source folder even when Desktop used a
+            # separate shared model library. Always refresh it from the running
+            # backend on open so existing users are repaired automatically.
+            self.detect_comfyui(quiet=True)
             self.refresh_h3_status()
+
+        def _comfy_url(self) -> str:
+            return self.comfy_url.text().strip() or "http://127.0.0.1:8188"
 
         def use_builtin_workflow(self):
             self.workflow.clear()
@@ -185,61 +192,73 @@ def install_h3_integration(ui_module) -> None:
                 QMessageBox.warning(self, "Could not open workflows", str(exc))
 
         def detect_comfyui(self, quiet: bool = False):
-            found = detect_comfyui_root(self.comfy_path.text().strip() or getattr(self.settings, "comfy_path", ""))
+            found = detect_comfyui_root(
+                self.comfy_path.text().strip() or getattr(self.settings, "comfy_path", ""),
+                self._comfy_url(),
+            )
             if found:
+                changed = self.comfy_path.text().strip() != str(found)
                 self.comfy_path.setText(str(found))
+                if changed:
+                    self.settings.comfy_path = str(found)
+                    save_settings(self.settings)
                 if not quiet:
-                    self.h3_log.append(f"Detected ComfyUI: {found}")
+                    self.h3_log.append(f"Detected active ComfyUI model location: {found}")
             elif not quiet:
                 QMessageBox.information(
                     self,
-                    "ComfyUI not detected",
-                    "ZeroAI could not find ComfyUI in the common Windows locations. Click Browse and select your ComfyUI folder.",
+                    "ComfyUI model location not detected",
+                    "ZeroAI could not resolve the model library used by the running ComfyUI instance. "
+                    "Make sure ComfyUI is running, or click Browse and select its models/storage folder.",
                 )
             self.refresh_h3_status()
 
         def browse_comfyui(self):
             start = self.comfy_path.text().strip() or str(Path.home())
-            path = QFileDialog.getExistingDirectory(self, "Select the ComfyUI folder", start)
+            path = QFileDialog.getExistingDirectory(self, "Select ComfyUI or its model storage folder", start)
             if path:
-                normalized = normalize_comfyui_root(path)
+                normalized = normalize_comfyui_root(path, self._comfy_url())
                 self.comfy_path.setText(str(normalized or Path(path)))
                 self.refresh_h3_status()
 
         def refresh_h3_status(self):
-            root = normalize_comfyui_root(self.comfy_path.text().strip())
+            root = normalize_comfyui_root(self.comfy_path.text().strip(), self._comfy_url())
             if not root or not root.exists():
-                self.h3_status.setText("H3: choose or detect your ComfyUI folder to check model files.")
+                self.h3_status.setText("H3: start ComfyUI or choose its model storage location.")
                 return
-            status = model_status(root)
+            status = model_status(root, self._comfy_url())
             ready = [name for name, info in status.items() if info["ready"]]
             missing = [item for item in H3_MODEL_FILES if not status[item.filename]["ready"]]
             if not missing:
-                self.h3_status.setText("H3 model files: READY (4/4). Restart ComfyUI if these files were just installed.")
+                self.h3_status.setText("H3 model files: READY (4/4). Restart ComfyUI if these files were just repaired.")
                 self.h3_progress.setValue(100)
             else:
                 names = ", ".join(item.label for item in missing)
-                self.h3_status.setText(f"H3 model files: {len(ready)}/4 installed. Missing: {names}.")
+                self.h3_status.setText(f"H3 model files in active library: {len(ready)}/4 installed. Missing: {names}.")
 
         def install_h3(self):
-            root = normalize_comfyui_root(self.comfy_path.text().strip())
-            if not root or not (root / "models").exists():
+            root = normalize_comfyui_root(self.comfy_path.text().strip(), self._comfy_url())
+            if not root or not root.exists():
+                self.detect_comfyui(quiet=True)
+                root = normalize_comfyui_root(self.comfy_path.text().strip(), self._comfy_url())
+            if not root or not root.exists():
                 self.browse_comfyui()
-                root = normalize_comfyui_root(self.comfy_path.text().strip())
-            if not root or not (root / "models").exists():
+                root = normalize_comfyui_root(self.comfy_path.text().strip(), self._comfy_url())
+            if not root or not root.exists():
                 return
 
-            missing = missing_models(root)
+            missing = missing_models(root, self._comfy_url())
             if not missing:
-                QMessageBox.information(self, "MiniMax H3", "All required H3 model files are already installed.")
+                QMessageBox.information(self, "MiniMax H3", "All required H3 model files are already installed in the active ComfyUI model library.")
                 self.refresh_h3_status()
                 return
 
             answer = QMessageBox.question(
                 self,
-                "Download MiniMax H3",
-                "ZeroAI will download the official MiniMax H3 Ref2VA files into your ComfyUI models folder.\n\n"
-                f"Full stack size is about {format_bytes(TOTAL_EXPECTED_BYTES)} and interrupted downloads can resume.\n\n"
+                "Repair MiniMax H3",
+                "ZeroAI will repair MiniMax H3 in the model library used by the RUNNING ComfyUI instance.\n\n"
+                "If v0.2 already downloaded the files into a different folder, ZeroAI will try to reuse/link/move those files first. "
+                "Only files that still cannot be found will be downloaded.\n\n"
                 "Continue?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
@@ -254,7 +273,7 @@ def install_h3_integration(ui_module) -> None:
             self.h3_log.clear()
             self.install_h3_btn.setEnabled(False)
             self.cancel_h3_btn.setEnabled(True)
-            self.h3_worker = H3DownloadThread(str(root))
+            self.h3_worker = H3DownloadThread(str(root), self._comfy_url())
             self.h3_worker.progress_changed.connect(self.on_h3_progress)
             self.h3_worker.log_line.connect(self.h3_log.append)
             self.h3_worker.installed.connect(self.on_h3_installed)
@@ -274,12 +293,12 @@ def install_h3_integration(ui_module) -> None:
             self.install_h3_btn.setEnabled(True)
             self.cancel_h3_btn.setEnabled(False)
             self.h3_progress.setValue(100)
-            self.h3_progress_text.setText("MiniMax H3 installed. Restart ComfyUI, then click Test ComfyUI.")
+            self.h3_progress_text.setText("MiniMax H3 repaired. Restart ComfyUI, then click Test ComfyUI.")
             self.refresh_h3_status()
             QMessageBox.information(
                 self,
-                "MiniMax H3 installed",
-                "All required model files are installed. Completely restart ComfyUI so it rescans the model folders.",
+                "MiniMax H3 repaired",
+                "All required model files are in ComfyUI's active model library. Completely restart ComfyUI so it rescans the model folders.",
             )
 
         def on_h3_failed(self, message: str):
@@ -332,11 +351,13 @@ def install_h3_integration(ui_module) -> None:
             if _is_builtin_or_legacy(self.settings.workflow_path):
                 self.settings.workflow_path = BUILTIN_H3_URI
                 save_settings(self.settings)
-            if not getattr(self.settings, "comfy_path", ""):
-                found = detect_comfyui_root()
-                if found:
-                    self.settings.comfy_path = str(found)
-                    save_settings(self.settings)
+
+            # Repair the v0.2 stored path on startup. The running ComfyUI process
+            # is authoritative, especially for Comfy Desktop shared model dirs.
+            found = detect_comfyui_root(getattr(self.settings, "comfy_path", ""), self.settings.comfy_url)
+            if found and str(found) != getattr(self.settings, "comfy_path", ""):
+                self.settings.comfy_path = str(found)
+                save_settings(self.settings)
             self.refresh_engine_status()
 
         def refresh_engine_status(self):
@@ -380,11 +401,11 @@ def install_h3_integration(ui_module) -> None:
                         )
                     else:
                         missing = "\n• ".join(readiness.get("missing", []))
-                        message = "MiniMax H3 is not fully installed in ComfyUI. Missing:\n\n• " + missing
+                        message = "MiniMax H3 is not fully installed in ComfyUI's ACTIVE model library. Missing:\n\n• " + missing
                     answer = QMessageBox.question(
                         self,
                         "MiniMax H3 setup required",
-                        message + "\n\nOpen ZeroAI Settings to download/repair H3 now?",
+                        message + "\n\nOpen ZeroAI Settings to repair the model paths now?",
                         QMessageBox.Yes | QMessageBox.No,
                         QMessageBox.Yes,
                     )
