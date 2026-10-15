@@ -290,6 +290,35 @@ def install_h3_integration(ui_module) -> None:
             if "cancelled" not in message.lower():
                 QMessageBox.critical(self, "H3 setup failed", message)
 
+        def _download_active(self) -> bool:
+            return bool(self.h3_worker and self.h3_worker.isRunning())
+
+        def _warn_download_active(self):
+            QMessageBox.information(
+                self,
+                "H3 download still running",
+                "Cancel the active H3 download before closing Settings. Partial files are kept and will resume next time.",
+            )
+
+        def accept(self):
+            if self._download_active():
+                self._warn_download_active()
+                return
+            super().accept()
+
+        def reject(self):
+            if self._download_active():
+                self._warn_download_active()
+                return
+            super().reject()
+
+        def closeEvent(self, event):
+            if self._download_active():
+                event.ignore()
+                self._warn_download_active()
+                return
+            super().closeEvent(event)
+
         def apply(self):
             visual_workflow = self.workflow.text().strip()
             super().apply()
