@@ -144,5 +144,5 @@ def prepare_workflow(template: dict, *, prompt: str, width: int, height: int, du
         "{{SEED}}": seed,
     }
     for i in range(1, 10):
-        replacements[f"{{REFERENCE_{i}}}"] = references[i - 1] if i <= len(references) else ""
+        replacements[f"{{{{REFERENCE_{i}}}}}"] = references[i - 1] if i <= len(references) else ""
     return _replace(copy.deepcopy(template), replacements)
