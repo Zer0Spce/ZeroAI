@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - '**.py'
+      - 'zeroai/workflows/**'
       - 'requirements.txt'
       - 'build_windows.bat'
       - '.github/workflows/windows-build.yml'
@@ -30,7 +31,7 @@ jobs:
       - name: Core tests
         run: python -m unittest discover -s tests -v
       - name: Build portable app
-        run: pyinstaller --noconfirm --clean --windowed --name ZeroAI app.py
+        run: pyinstaller --noconfirm --clean --windowed --name ZeroAI --add-data "zeroai\workflows;zeroai\workflows" app.py
       - name: Create portable ZIP
         shell: powershell
         run: Compress-Archive -Path 'dist\ZeroAI\*' -DestinationPath 'dist\ZeroAI-Windows-x64.zip' -Force
