@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - '**.py'
+      - 'zeroai/workflows/**'
       - 'requirements.txt'
       - 'build_windows.bat'
       - '.github/workflows/windows-build.yml'
@@ -29,8 +30,12 @@ jobs:
         run: python -m compileall app.py zeroai
       - name: Core tests
         run: python -m unittest discover -s tests -v
+      - name: GUI smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "import app; from PySide6.QtWidgets import QApplication; q=QApplication([]); w=app.ui.MainWindow(); d=app.ui.SettingsDialog(w.settings,w); print(w.windowTitle(), d.windowTitle()); d.close(); w.close()"
       - name: Build portable app
-        run: pyinstaller --noconfirm --clean --windowed --name ZeroAI app.py
+        run: pyinstaller --noconfirm --clean --windowed --name ZeroAI --add-data "zeroai\workflows;zeroai\workflows" app.py
       - name: Create portable ZIP
         shell: powershell
         run: Compress-Archive -Path 'dist\ZeroAI\*' -DestinationPath 'dist\ZeroAI-Windows-x64.zip' -Force

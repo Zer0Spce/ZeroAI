@@ -4,7 +4,7 @@
 
 Drop in reference photos of an AI model/influencer, describe a topic or direction, let ZeroAI split the idea into short H3-friendly scenes, generate those scenes through ComfyUI, and stitch the results into one finished MP4.
 
-## v0.1 features
+## v0.2 features
 
 - Windows-only PySide6 desktop UI
 - Drag/drop up to 9 influencer reference images
@@ -14,7 +14,15 @@ Drop in reference photos of an AI model/influencer, describe a topic or directio
 - Automatic scene planning
 - Optional local Ollama planner for better hooks/dialogue
 - Scene-by-scene prompt inspection/editing
-- MiniMax H3 generation through ComfyUI's HTTP API
+- MiniMax H3 Ref2VA generation through ComfyUI's HTTP API
+- **Built-in ZeroAI H3 API workflows — no manual JSON setup required**
+- **Adaptive 1–9 reference workflow selection**
+- **Automatic ComfyUI folder detection on Windows**
+- **One-click Download / Repair H3 setup**
+- **Resumable official model downloads with progress and disk-space checks**
+- **H3 readiness checks before generation**
+- **Friendly missing-model / outdated-ComfyUI errors instead of raw workflow failures**
+- Automatic H3 canvas and frame-grid normalization
 - Automatic reference image upload
 - Queue/poll/download flow for every scene
 - Automatic final MP4 stitching with FFmpeg
@@ -23,11 +31,39 @@ Drop in reference photos of an AI model/influencer, describe a topic or directio
 - Portable Windows build via PyInstaller
 - GitHub Actions Windows build artifact
 
-## How the H3 integration works
+## MiniMax H3 setup
 
-ZeroAI talks to a running ComfyUI instance (default `http://127.0.0.1:8188`). In **Settings**, select an H3 workflow exported in ComfyUI's **API format**.
+ZeroAI talks to a running ComfyUI instance, normally at `http://127.0.0.1:8188`.
 
-ZeroAI supports placeholder tokens inside that workflow:
+Open **Settings → MiniMax H3 — One-Click Setup**. ZeroAI can detect common Windows ComfyUI locations, or you can browse to the ComfyUI folder once. Click **Download / Repair H3** and ZeroAI downloads the official Comfy-Org Ref2VA stack directly into the correct folders.
+
+The full stack is roughly 43 GB and includes:
+
+```text
+ComfyUI\models\diffusion_models\
+  minimax_h3_ref2va_pruned_int8_convrot.safetensors
+
+ComfyUI\models\text_encoders\
+  qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
+
+ComfyUI\models\vae\
+  minimax_h3_video_vae_fp16.safetensors
+  minimax_h3_audio_vae_fp32.safetensors
+```
+
+Downloads resume from `.part` files after interruption. When setup finishes, completely restart ComfyUI so it rescans the model folders.
+
+## Built-in H3 workflow
+
+ZeroAI v0.2 defaults to its own compact **MiniMax H3 Ref2VA API workflow**. It automatically adapts to however many influencer reference images are currently attached, from 1 through 9.
+
+Ready-to-edit JSON copies are also written to:
+
+```text
+%LOCALAPPDATA%\ZeroAI\workflows\
+```
+
+You can still select a custom ComfyUI API workflow in Settings. Custom workflows continue to support these placeholder tokens:
 
 | Token | Value |
 |---|---|
@@ -35,25 +71,23 @@ ZeroAI supports placeholder tokens inside that workflow:
 | `{{WIDTH}}` | target width |
 | `{{HEIGHT}}` | target height |
 | `{{DURATION}}` | scene seconds |
-| `{{FRAMES}}` | seconds × 24 |
+| `{{FRAMES}}` | scene frame count |
 | `{{SEED}}` | random seed |
 | `{{REFERENCE_1}}` … `{{REFERENCE_9}}` | uploaded ComfyUI input image names |
 
-Put these tokens into the appropriate node inputs before exporting the workflow API JSON. This keeps ZeroAI compatible with official H3 workflows and community low-VRAM variants instead of hard-coding one exact node graph.
-
-## Recommended H3 mode for influencers
-
-Use MiniMax H3 **Ref2VA / reference-to-video** when character identity is important. H3 supports multiple reference images and synchronized audio/video generation. The official ComfyUI H3 workflow is the best starting point.
+For MiniMax H3 workflows, ZeroAI automatically normalizes the canvas to H3's native area/multiple-of-32 requirements and snaps duration to the model's `17k+5` frame grid at 24 fps.
 
 ## Quick start
 
-1. Install Python 3.12 on Windows.
-2. Install and start ComfyUI with a working MiniMax H3 Ref2VA workflow.
-3. Double-click `run_zeroai.bat`.
-4. Open **Settings** and select your exported H3 API workflow JSON.
-5. Add influencer reference images.
-6. Type the topic/direction.
-7. Click **Plan Scenes**, review them if desired, then **Generate Video**.
+1. Install/start an up-to-date ComfyUI on Windows.
+2. Launch ZeroAI.
+3. Open **Settings**.
+4. Detect or browse to your ComfyUI folder.
+5. Click **Download / Repair H3** if H3 is not ready.
+6. Restart ComfyUI after the model installation completes.
+7. Add 1–9 influencer reference images in ZeroAI.
+8. Type the topic/direction.
+9. Click **Plan Scenes**, review them if desired, then **Generate Video**.
 
 ### Optional local AI planner
 
@@ -77,6 +111,6 @@ No installer is required.
 
 ## Notes
 
-MiniMax H3 is a large model. ZeroAI is the controller/UI; generation performance and VRAM requirements depend on the H3 workflow and model variant you install in ComfyUI.
+MiniMax H3 is a large model. ZeroAI is the controller/UI; generation performance and VRAM requirements depend on your GPU, ComfyUI configuration and H3 model stack.
 
 Review the MiniMax H3 license before redistribution or commercial deployment, and clearly disclose AI-generated content where required.
