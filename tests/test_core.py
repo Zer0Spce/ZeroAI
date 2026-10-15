@@ -4,7 +4,7 @@ from pathlib import Path
 
 from zeroai.builtin_workflows import BUILTIN_H3_URI, align_h3_frames, adapt_h3_canvas
 from zeroai.comfy import load_workflow, prepare_workflow
-from zeroai.h3_setup import detect_comfyui_root
+from zeroai.h3_setup import detect_comfyui_root, runtime_model_roots_from_stats
 from zeroai.models import AppSettings
 from zeroai.planner import create_plan
 
@@ -79,7 +79,41 @@ class PlannerTests(unittest.TestCase):
             root = Path(tmp) / "ComfyUI"
             (root / "models").mkdir(parents=True)
             (root / "main.py").write_text("", encoding="utf-8")
-            self.assertEqual(detect_comfyui_root(root), root)
+            self.assertEqual(detect_comfyui_root(root, "http://127.0.0.1:9"), root)
+
+    def test_runtime_model_roots_reads_desktop_extra_model_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            shared_models = base / "ComfyUI-Shared" / "models"
+            (shared_models / "vae").mkdir(parents=True)
+            config = base / "shared_model_paths.yaml"
+            config.write_text(
+                "comfy.desktop_0:\n"
+                f"  base_path: '{shared_models}'\n"
+                "  is_default: true\n"
+                "  'vae': 'vae/'\n"
+                "  'diffusion_models': 'diffusion_models/'\n",
+                encoding="utf-8",
+            )
+            stats = {
+                "system": {
+                    "argv": [
+                        "main.py",
+                        "--extra-model-paths-config",
+                        str(config),
+                    ]
+                }
+            }
+            roots = runtime_model_roots_from_stats(stats)
+            self.assertTrue(roots)
+            self.assertEqual(roots[0], shared_models)
+
+    def test_runtime_models_directory_has_priority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp) / "models"
+            models.mkdir()
+            stats = {"system": {"argv": ["main.py", "--models-directory", str(models)]}}
+            self.assertEqual(runtime_model_roots_from_stats(stats)[0], models)
 
 
 if __name__ == "__main__":
