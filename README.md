@@ -4,6 +4,15 @@
 
 Drop in reference photos of an AI model/influencer, describe a topic or direction, let ZeroAI split the idea into short H3-friendly scenes, generate those scenes through ComfyUI, and stitch the results into one finished MP4.
 
+## v0.2.1 hotfix
+
+- Fixes Comfy Desktop installations that keep models in a shared/launcher-managed directory instead of `<ComfyUI>\models`.
+- Reads the **running ComfyUI process arguments** from `/system_stats` and follows `--models-directory`, `--base-directory`, and `--extra-model-paths-config`.
+- Understands current Comfy Desktop shared model libraries plus the legacy Desktop `basePath` configuration.
+- Automatically replaces stale v0.2 model paths with the model library actually used by the running backend.
+- **Reuses already-downloaded H3 files** from the old v0.2 location. On the same NTFS volume ZeroAI uses hard links, so there is no second 43 GB copy; otherwise it moves the files before attempting any new download.
+- Settings now reports H3 status against the **active** model library, matching what ComfyUI itself sees.
+
 ## v0.2 features
 
 - Windows-only PySide6 desktop UI
@@ -35,27 +44,29 @@ Drop in reference photos of an AI model/influencer, describe a topic or directio
 
 ZeroAI talks to a running ComfyUI instance, normally at `http://127.0.0.1:8188`.
 
-Open **Settings → MiniMax H3 — One-Click Setup**. ZeroAI can detect common Windows ComfyUI locations, or you can browse to the ComfyUI folder once. Click **Download / Repair H3** and ZeroAI downloads the official Comfy-Org Ref2VA stack directly into the correct folders.
+Open **Settings → MiniMax H3 — One-Click Setup**. ZeroAI first reads the model paths used by the running ComfyUI backend. This matters for **Comfy Desktop**, where the active model library can be a shared folder separate from the ComfyUI source/install directory.
+
+Click **Download / Repair H3**. ZeroAI first searches known old/current model locations for existing H3 files and reuses them when possible. Only files that are still genuinely missing are downloaded from the official Comfy-Org repository.
 
 The full stack is roughly 43 GB and includes:
 
 ```text
-ComfyUI\models\diffusion_models\
+models\diffusion_models\
   minimax_h3_ref2va_pruned_int8_convrot.safetensors
 
-ComfyUI\models\text_encoders\
+models\text_encoders\
   qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
 
-ComfyUI\models\vae\
+models\vae\
   minimax_h3_video_vae_fp16.safetensors
   minimax_h3_audio_vae_fp32.safetensors
 ```
 
-Downloads resume from `.part` files after interruption. When setup finishes, completely restart ComfyUI so it rescans the model folders.
+Downloads resume from `.part` files after interruption. When setup/repair finishes, completely restart ComfyUI so it rescans the model folders.
 
 ## Built-in H3 workflow
 
-ZeroAI v0.2 defaults to its own compact **MiniMax H3 Ref2VA API workflow**. It automatically adapts to however many influencer reference images are currently attached, from 1 through 9.
+ZeroAI defaults to its own compact **MiniMax H3 Ref2VA API workflow**. It automatically adapts to however many influencer reference images are currently attached, from 1 through 9.
 
 Ready-to-edit JSON copies are also written to:
 
@@ -79,12 +90,12 @@ For MiniMax H3 workflows, ZeroAI automatically normalizes the canvas to H3's nat
 
 ## Quick start
 
-1. Install/start an up-to-date ComfyUI on Windows.
+1. Install/start an up-to-date ComfyUI or Comfy Desktop on Windows.
 2. Launch ZeroAI.
 3. Open **Settings**.
-4. Detect or browse to your ComfyUI folder.
-5. Click **Download / Repair H3** if H3 is not ready.
-6. Restart ComfyUI after the model installation completes.
+4. Click **Detect** while ComfyUI is running; ZeroAI will resolve the active model library.
+5. Click **Download / Repair H3** if H3 is not ready. Existing v0.2 downloads are reused automatically when possible.
+6. Restart ComfyUI after the model repair/install completes.
 7. Add 1–9 influencer reference images in ZeroAI.
 8. Type the topic/direction.
 9. Click **Plan Scenes**, review them if desired, then **Generate Video**.
