@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ZeroAI local data
+*.zeroai.json
+settings.json
+outputs/
+projects/
+workflows/local/
+
+# Secrets
+.env
+*.key
